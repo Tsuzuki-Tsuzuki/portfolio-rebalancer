@@ -113,13 +113,32 @@ with tab_upload:
                 df_input["Weight"] = pd.to_numeric(df_input["Weight"], errors="coerce")
                 df_input = df_input.dropna()
 
+                # Remove total/summary rows
+                total_keywords = ["total", "titre", "sum", "portfolio", "subtotal", "sous-total"]
+                mask = df_input["Stock"].str.lower().str.contains("|".join(total_keywords), na=False)
+                removed = df_input[mask]["Stock"].tolist()
+                df_input = df_input[~mask].reset_index(drop=True)
+                if removed:
+                    st.warning(f"Ignored summary rows: {', '.join(removed)}")
+
                 # Normalise weights: if user entered percentages (sum ~ 100) convert to decimals
                 if df_input["Weight"].sum() > 1.5:
                     df_input["Weight"] = df_input["Weight"] / 100.0
 
-                st.success(f"Loaded {len(df_input)} stocks.")
-                st.dataframe(df_input.style.format({"Beta": "{:.4f}", "Weight": "{:.2%}"}),
-                             use_container_width=True)
+                st.success(f"Loaded {len(df_input)} stocks. You can delete rows below before running the optimization.")
+                df_input["Weight"] = df_input["Weight"] * 100  # show as % for editing
+                df_input = st.data_editor(
+                    df_input,
+                    num_rows="dynamic",
+                    use_container_width=True,
+                    column_config={
+                        "Stock": st.column_config.TextColumn("Stock"),
+                        "Beta":  st.column_config.NumberColumn("Beta", format="%.4f"),
+                        "Weight": st.column_config.NumberColumn("Weight (%)", format="%.2f"),
+                    },
+                )
+                df_input = df_input.dropna()
+                df_input["Weight"] = df_input["Weight"] / 100  # back to decimal
         except Exception as e:
             st.error(f"Error reading file: {e}")
 
@@ -159,6 +178,15 @@ with tab_manual:
         manual_df = manual_df.dropna()
         df_input = manual_df.rename(columns={"Weight (%)": "Weight"}).copy()
         df_input["Weight"] = df_input["Weight"] / 100.0
+
+        # Remove total/summary rows
+        total_keywords = ["total", "titre", "sum", "portfolio", "subtotal", "sous-total"]
+        mask = df_input["Stock"].str.lower().str.contains("|".join(total_keywords), na=False)
+        removed = df_input[mask]["Stock"].tolist()
+        df_input = df_input[~mask].reset_index(drop=True)
+        if removed:
+            st.warning(f"Ignored summary rows: {', '.join(removed)}")
+
         st.success(f"Using {len(df_input)} stocks from the table above.")
 
 # ─────────────────────────────────────────────
