@@ -285,10 +285,66 @@ if df_input is not None and len(df_input) >= 2:
             "The optimizer will still run but results may be unexpected."
         )
 
+    # ── Feasibility check BEFORE running optimizer ──────────────────
+    cap = max_weight / 100.0
+    n   = len(betas_arr)
+    # Best case: put all weight on the stock with highest/lowest beta
+    max_achievable = float(np.sort(betas_arr)[-1] * cap +
+                           np.sum(np.sort(betas_arr)[:-1] * min(cap, max(0, 1 - cap * (n-1)) / max(1, n-1))))
+    # Simpler reliable bounds: sort betas, fill greedily
+    sorted_desc = np.sort(betas_arr)[::-1]
+    sorted_asc  = np.sort(betas_arr)
+    # Max achievable beta: put max_weight on highest-beta stocks
+    w_max = np.full(n, cap)
+    w_max = w_max / w_max.sum()
+    beta_upper = float(np.dot(np.sort(betas_arr)[::-1],
+                              np.minimum(cap, np.ones(n) * cap)))
+    # Just use simple estimate: if all weight on max beta stock
+    beta_upper = float(np.max(betas_arr))   # upper bound (100% in one stock, no cap)
+    beta_lower = float(np.min(betas_arr))   # lower bound
+
+    # With cap: distribute greedily
+    def greedy_beta(betas_sorted, cap):
+        w = np.zeros(len(betas_sorted))
+        remaining = 1.0
+        for i in range(len(betas_sorted)):
+            alloc = min(cap, remaining)
+            w[i] = alloc
+            remaining -= alloc
+            if remaining <= 1e-9:
+                break
+        return float(np.dot(w, betas_sorted))
+
+    beta_max_with_cap = greedy_beta(np.sort(betas_arr)[::-1], cap)
+    beta_min_with_cap = greedy_beta(np.sort(betas_arr),        cap)
+
+    if target_beta > beta_max_with_cap + 1e-6:
+        st.error(
+            f"Target beta {target_beta:.2f} is NOT reachable with your portfolio. "
+            f"Maximum achievable beta with a {max_weight}% cap is **{beta_max_with_cap:.4f}**. "
+            f"Try increasing the max weight cap or adding higher-beta stocks."
+        )
+        st.stop()
+    elif target_beta < beta_min_with_cap - 1e-6:
+        st.error(
+            f"Target beta {target_beta:.2f} is NOT reachable with your portfolio. "
+            f"Minimum achievable beta with a {max_weight}% cap is **{beta_min_with_cap:.4f}**. "
+            f"Try increasing the max weight cap or adding lower-beta stocks."
+        )
+        st.stop()
+    else:
+        st.success(
+            f"Feasibility check passed. Target beta {target_beta:.2f} is within the "
+            f"achievable range [{beta_min_with_cap:.4f}, {beta_max_with_cap:.4f}] for your portfolio."
+        )
+
     result = run_optimization(stocks_list, betas_arr, weights_arr, target_beta, max_weight)
 
     if not result.success:
-        st.error(f"Optimization warning: {result.message}")
+        st.error(
+            f"Optimization failed: {result.message}. "
+            "Try relaxing the max weight cap in the sidebar or check your beta values."
+        )
 
     new_weights = result.x
     old_beta    = float(np.dot(weights_arr, betas_arr))
@@ -327,9 +383,9 @@ if df_input is not None and len(df_input) >= 2:
                 "New Capital":     "{:,.0f} MAD",
                 "Capital Change":  "{:+,.0f} MAD",
             })
-            .applymap(lambda v: "color: green" if isinstance(v, float) and v > 0
-                      else ("color: red" if isinstance(v, float) and v < 0 else ""),
-                      subset=["Change", "Capital Change"]),
+            .map(lambda v: "color: green" if isinstance(v, float) and v > 0
+                 else ("color: red" if isinstance(v, float) and v < 0 else ""),
+                 subset=["Change", "Capital Change"]),
         use_container_width=True,
         height=400,
     )
